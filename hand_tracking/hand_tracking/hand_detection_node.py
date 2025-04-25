@@ -3,17 +3,21 @@ from rclpy.node import Node
 import cv2
 import numpy as np
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Float32, Int32
 from cv_bridge import CvBridge
 
 class HandDetectionNode(Node):
-    def __init__(self):
-        super().__init__('hand_detection_node')
+    def _init_(self):
+        super()._init_('hand_detection_node')
         self.publisher_img = self.create_publisher(Image, 'hand_detected/image', 10)
         self.publisher_coords = self.create_publisher(Float32MultiArray, 'hand_coordinates', 10)
+        self.publisher_confidence = self.create_publisher(Float32, 'hand_confidence', 10)
+        self.publisher_frame_count = self.create_publisher(Int32, 'frame_count', 10)
+        self.publisher_hand_size = self.create_publisher(Float32MultiArray, 'hand_size', 10)
         self.bridge = CvBridge()
         self.cap = cv2.VideoCapture(0)
         self.timer = self.create_timer(0.1, self.detect_hand)
+        self.frame_count = 0
 
     def detect_hand(self):
         ret, frame = self.cap.read()
@@ -40,8 +44,26 @@ class HandDetectionNode(Node):
             msg.data = [float(x), float(y), float(w), float(h)]
             self.publisher_coords.publish(msg)
 
+            # Publish confidence score based on contour area
+            area = cv2.contourArea(largest_contour)
+            confidence_msg = Float32()
+            confidence_msg.data = min(area / 10000.0, 1.0)  # normalized 0-1
+            self.publisher_confidence.publish(confidence_msg)
+
+            # Publish hand size separately
+            size_msg = Float32MultiArray()
+            size_msg.data = [float(w), float(h)]
+            self.publisher_hand_size.publish(size_msg)
+
+        # Publish processed image
         img_msg = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
         self.publisher_img.publish(img_msg)
+
+        # Publish frame count
+        self.frame_count += 1
+        frame_msg = Int32()
+        frame_msg.data = self.frame_count
+        self.publisher_frame_count.publish(frame_msg)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -49,4 +71,3 @@ def main(args=None):
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
-
